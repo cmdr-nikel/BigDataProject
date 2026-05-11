@@ -18,6 +18,50 @@ A streaming platform (think Netflix/Crunchyroll-like) uses this catalogue to pow
 
 ---
 
+## Data Cleaning Pipeline — `Scripts/cleaning.ipynb`
+
+The notebook takes the raw CSV and produces a MongoDB-ready JSON in 6 steps:
+
+| Step | What happens |
+|---|---|
+| **1. Load** | Read `anilist_anime_data_complete.csv` (~20 k rows, 62 columns) |
+| **2. Drop columns** | Remove pandas index, session flags, redundant image URLs, manga-only fields |
+| **3. Fix types** | Cast to `Int64` (scores, counts), `bool`, `datetime`; reconstruct nested objects: `title`, `coverImage`, `trailer`, `startDate`, `endDate` |
+| **4. Data quality** | Remove duplicates by `id`, drop rows with no `id`, clamp `averageScore`/`meanScore` to 0–100 |
+| **5. Parse JSON columns** | 16 columns stored as JSON strings (e.g. `tags`, `characters`, `staff`) → parsed into Python lists/dicts |
+| **6. Save** | Serialize to `Data/anilist_cleaned.json`; `NaN`/`Infinity` replaced with `null` so the file is valid JSON |
+
+Output: **20 329 documents · 43 fields** ready for `mongoimport`.
+
+---
+
+## Importing into MongoDB
+
+### Via terminal (recommended)
+
+```bash
+mongoimport --db anilist_db --collection anime \
+  --file Data/anilist_cleaned.json --jsonArray
+```
+
+Run from the project root. The `--jsonArray` flag is required because the file contains a top-level JSON array.
+
+If your MongoDB instance requires authentication:
+
+```bash
+mongoimport --db anilist_db --collection anime \
+  --file Data/anilist_cleaned.json --jsonArray \
+  -u <user> -p <password> --authenticationDatabase admin
+```
+
+### Via MongoDB Compass
+
+1. Open Compass → connect to `mongodb://localhost:27017`
+2. Create database `anilist_db` and collection `anime`
+3. Click **Add Data → Import JSON file** → select `Data/anilist_cleaned.json`
+
+---
+
 ## Collections Structure (≤ 10)
 
 | Collection | Description |
