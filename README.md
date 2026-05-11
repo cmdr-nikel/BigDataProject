@@ -42,7 +42,7 @@ A streaming platform (think Netflix/Crunchyroll-like) uses this catalogue to pow
 - [x] Data types fixed (Int64, bool, datetime, nested objects)
 - [x] JSON columns parsed from strings → Python objects
 - [x] Cleaned output saved as `anilist_cleaned.json`
-- [ ] Import into MongoDB (via `mongoimport` or Compass)
+- [x] Import into MongoDB (via `mongoimport` or Compass)
 
 ### Phase 2 — Validation Rules (≥ 5)
 - [ ] `averageScore` — integer between 0 and 100
@@ -87,7 +87,7 @@ A streaming platform (think Netflix/Crunchyroll-like) uses this catalogue to pow
 | Submission (Moodle) | **May 22, 23:59** |
 | Presentation | TBD — book slot via course link |
 
-> ⚠️ Late penalty: −1 point per day, up to −5
+> Late penalty: −1 point per day, up to −5
 
 ---
 
