@@ -25,40 +25,37 @@ The notebook takes the raw CSV and produces a MongoDB-ready JSON in 6 steps:
 | Step | What happens |
 |---|---|
 | **1. Load** | Read `anilist_anime_data_complete.csv` (~20 k rows, 62 columns) |
-| **2. Drop columns** | Remove pandas index, session flags, redundant image URLs, manga-only fields |
+| **2. Drop columns** | Remove pandas index, session flags, redundant image URLs, manga-only fields, external links (`siteUrl`, `externalLinks`), low-value metadata (`seasonInt`, `updatedAt`, `idMal`), and near-empty columns (`nextAiringEpisode` 99.9% null, `airingSchedule` 76.1% null) |
 | **3. Fix types** | Cast to `Int64` (scores, counts), `bool`, `datetime`; reconstruct nested objects: `title`, `coverImage`, `trailer`, `startDate`, `endDate` |
 | **4. Data quality** | Remove duplicates by `id`, drop rows with no `id`, clamp `averageScore`/`meanScore` to 0–100 |
 | **5. Parse JSON columns** | 16 columns stored as JSON strings (e.g. `tags`, `characters`, `staff`) → parsed into Python lists/dicts |
-| **6. Save** | Serialize to `Data/anilist_cleaned.json`; `NaN`/`Infinity` replaced with `null` so the file is valid JSON |
+| **6. Extract collections** | `characters`, `staff`, `studios`, `tags`, `reviews` extracted into separate collections; GraphQL `node` wrapper artifacts unwrapped into flat documents; `anime` documents retain ID reference lists only |
+| **7. Save & import** | 6 JSON files written to `Data/`; `mongoimport` runs automatically for each collection with `--drop` to ensure idempotent re-runs |
 
-Output: **20 329 documents · 43 fields** ready for `mongoimport`.
+Output: **20 329 `anime` documents · 36 fields** + 5 separate collections, auto-imported into MongoDB.
 
 ---
 
 ## Importing into MongoDB
 
-### Via terminal (recommended)
+### Automatic (recommended)
+
+Import is automated — running `cleaning.ipynb` from top to bottom writes all 6 JSON files and calls `mongoimport` for each collection automatically. MongoDB must be running on `localhost:27017`. Each run uses `--drop`, so re-runs are safe and idempotent.
+
+### Manual fallback
+
+If auto-import fails, run from the project root:
 
 ```bash
-mongoimport --db anilist_db --collection anime \
-  --file Data/anilist_cleaned.json --jsonArray
+mongoimport --db anilist_db --collection anime --file Data/anime.json --jsonArray --drop
+mongoimport --db anilist_db --collection characters --file Data/characters.json --jsonArray --drop
+mongoimport --db anilist_db --collection staff --file Data/staff.json --jsonArray --drop
+mongoimport --db anilist_db --collection studios --file Data/studios.json --jsonArray --drop
+mongoimport --db anilist_db --collection tags --file Data/tags.json --jsonArray --drop
+mongoimport --db anilist_db --collection reviews --file Data/reviews.json --jsonArray --drop
 ```
 
-Run from the project root. The `--jsonArray` flag is required because the file contains a top-level JSON array.
-
-If your MongoDB instance requires authentication:
-
-```bash
-mongoimport --db anilist_db --collection anime \
-  --file Data/anilist_cleaned.json --jsonArray \
-  -u <user> -p <password> --authenticationDatabase admin
-```
-
-### Via MongoDB Compass
-
-1. Open Compass → connect to `mongodb://localhost:27017`
-2. Create database `anilist_db` and collection `anime`
-3. Click **Add Data → Import JSON file** → select `Data/anilist_cleaned.json`
+If your MongoDB instance requires authentication, add `-u <user> -p <password> --authenticationDatabase admin` to each command.
 
 ---
 
@@ -66,14 +63,14 @@ mongoimport --db anilist_db --collection anime \
 
 | Collection | Description |
 |---|---|
-| `anime` | Core documents — one per title, all basic fields |
-| `characters` | Extracted from `anime.characters` — roles, names, voice actors |
-| `staff` | Directors, writers, composers per anime |
-| `studios` | Studio profiles + which anime they produced |
+| `anime` | Core documents — one per title, all basic fields; nested arrays replaced with ID reference lists |
+| `characters` | Unique character profiles — names, images, roles; GraphQL `node` wrapper removed |
+| `staff` | Directors, writers, composers — deduplicated across all anime |
+| `studios` | Studio profiles — `isMain` flag preserved from GraphQL edge, `node` wrapper removed |
 | `tags` | Tag taxonomy — categories, descriptions, spoiler flags |
 | `reviews` | User reviews with ratings and summaries |
 
-> Final structure may be adjusted during import phase.
+Relations between `anime` and the five collections are maintained via ID references, enabling `$lookup` aggregations.
 
 ---
 
