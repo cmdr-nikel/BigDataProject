@@ -115,7 +115,7 @@ This query identifies titles that are both well-rated and widely popular. These 
 Query 5 — Recent anime releases
 
 Business objective:
-Analyse recent anime titles released from 2020 onwards.
+Analyse recent and upcoming anime titles from 2020 onwards.
 
 MongoDB query:
 db.anime.find(
