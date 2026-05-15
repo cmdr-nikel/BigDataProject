@@ -1,0 +1,29 @@
+use('anilist_db');
+
+db.runCommand({
+  collMod: "anime",
+  validator: {
+    $jsonSchema: {
+      bsonType: "object",
+      required: ["title", "averageScore", "status"],
+      properties: {
+        title: { 
+          bsonType: "string" 
+        },
+        averageScore: { 
+          bsonType: "int", 
+          minimum: 0, 
+          maximum: 100 
+        },
+        status: { 
+          enum: ["FINISHED", "RELEASING", "NOT_YET_RELEASED", "CANCELLED", "HIATUS"] 
+        }
+      }
+    }
+  },
+  validationLevel: "strict",
+  validationAction: "error"
+});
+
+db.anime.createIndex({ "averageScore": 1 });
+db.anime.createIndex({ "title": 1 });
