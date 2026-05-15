@@ -1,0 +1,139 @@
+Big Data Storage — AniList Anime Dataset
+Queries Section
+
+Database: anilist_db
+Main collection: anime
+
+The following queries were designed to support catalogue analysis for an anime streaming platform. The goal is to identify high-rated titles, popular titles, relevant genres, recent releases and anime that combine both quality and audience demand.
+
+
+Query 1 — Top high-rated anime
+
+Business objective:
+Identify the highest-rated anime titles in the catalogue that could be promoted by the platform.
+
+MongoDB query:
+db.anime.find(
+  {
+    averageScore: { $gte: 85 }
+  },
+  {
+    _id: 0,
+    id: 1,
+    title: 1,
+    format: 1,
+    seasonYear: 1,
+    averageScore: 1,
+    popularity: 1,
+    genres: 1
+  }
+).sort({ averageScore: -1 }).limit(10)
+
+Expected insight:
+This query helps identify premium-quality titles based on user ratings. These anime could be highlighted in recommendation sections, marketing campaigns or curated lists.
+
+
+Query 2 — Most popular anime
+
+Business objective:
+Identify the anime titles with the highest audience reach and user interest.
+
+MongoDB query:
+db.anime.find(
+  {
+    popularity: { $gte: 100000 }
+  },
+  {
+    _id: 0,
+    id: 1,
+    title: 1,
+    format: 1,
+    seasonYear: 1,
+    popularity: 1,
+    averageScore: 1,
+    favourites: 1
+  }
+).sort({ popularity: -1 }).limit(10)
+
+Expected insight:
+This query shows which titles attract the largest audience. This is useful for understanding demand and prioritising content visibility on the platform.
+
+
+Query 3 — Anime by genre
+
+Business objective:
+Analyse anime titles belonging to a specific genre, using Action as an example.
+
+MongoDB query:
+db.anime.find(
+  {
+    genres: "Action"
+  },
+  {
+    _id: 0,
+    id: 1,
+    title: 1,
+    format: 1,
+    genres: 1,
+    averageScore: 1,
+    popularity: 1
+  }
+).sort({ popularity: -1 }).limit(10)
+
+Expected insight:
+This query helps the platform understand which Action anime are most popular. The same query structure can be reused for other genres, such as Comedy, Romance, Fantasy or Drama.
+
+
+Query 4 — Popular and highly rated anime
+
+Business objective:
+Identify anime titles that combine both high popularity and strong user evaluation.
+
+MongoDB query:
+db.anime.find(
+  {
+    averageScore: { $gte: 80 },
+    popularity: { $gte: 100000 }
+  },
+  {
+    _id: 0,
+    id: 1,
+    title: 1,
+    format: 1,
+    seasonYear: 1,
+    averageScore: 1,
+    popularity: 1,
+    favourites: 1,
+    genres: 1
+  }
+).sort({ averageScore: -1, popularity: -1 }).limit(10)
+
+Expected insight:
+This query identifies titles that are both well-rated and widely popular. These are strong candidates for recommendation, promotion or licensing decisions because they combine quality and demand.
+
+
+Query 5 — Recent anime releases
+
+Business objective:
+Analyse recent anime titles released from 2020 onwards.
+
+MongoDB query:
+db.anime.find(
+  {
+    seasonYear: { $gte: 2020 }
+  },
+  {
+    _id: 0,
+    id: 1,
+    title: 1,
+    format: 1,
+    season: 1,
+    seasonYear: 1,
+    averageScore: 1,
+    popularity: 1,
+    status: 1
+  }
+).sort({ seasonYear: -1, popularity: -1 }).limit(20)
+
+Expected insight:
+This query helps analyse newer anime titles and identify recent releases that are gaining popularity. This can support decisions about which recent content should be promoted on the platform.
