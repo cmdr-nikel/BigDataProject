@@ -1,0 +1,346 @@
+=====================================================================
+ Big Data Storage — Final Project
+ Group 16  •  Nova IMS  •  2025/2026
+ Database: anilist_db
+=====================================================================
+
+Dataset
+-------
+AniList Anime catalogue scraped via the public AniList GraphQL API
+(20 329 anime, 144 319 characters, 39 745 studios, 13 629 reviews,
+418 tags). The data was cleaned and re-shaped in
+`Scripts/cleaning.ipynb` and imported into 5 MongoDB collections
+inside the database `anilist_db`:
+
+    anime, characters, studios, tags, reviews
+
+Business framing
+----------------
+We treat this database as the back-end catalogue of an anime
+streaming platform. The queries / aggregations below answer
+questions a content-curation team would ask:
+
+    • Which titles deserve homepage promotion?
+    • Which studios are the strongest production partners?
+    • How has the catalogue's quality evolved over time?
+    • Which genres drive the most engagement?
+
+Run order
+---------
+    1. Run `schema_and_indexes.js.txt` first (creates validators
+       and the indexes used below).
+    2. Then run any query / aggregation in this file from the
+       MongoDB Compass MongoSH tab or the `mongosh` CLI.
+
+
+=====================================================================
+ SECTION 1 — QUERIES (with index-impact analysis)
+=====================================================================
+
+---------------------------------------------------------------------
+ Query 1 — Top high-rated anime
+---------------------------------------------------------------------
+Business goal:
+    Surface the highest-scored titles for a "Critically acclaimed"
+    homepage carousel.
+
+db.anime.find(
+    { averageScore: { $gte: 85 } },
+    { _id: 0, id: 1, title: 1, format: 1, seasonYear: 1,
+      averageScore: 1, popularity: 1, genres: 1 }
+).sort({ averageScore: -1 }).limit(10)
+
+Index used: { averageScore: -1 }   (created in schema_and_indexes.js)
+
+Performance comparison:
+    db.anime.find({ averageScore: { $gte: 85 } })
+            .sort({ averageScore: -1 }).limit(10)
+            .explain("executionStats")
+
+    BEFORE index : COLLSCAN, ~20 329 docs examined
+    AFTER  index : IXSCAN over `score_desc`, < 100 keys examined,
+                   executionTimeMillis drops from ~XX ms to ~X ms
+                   (fill in actual numbers from your run).
+
+
+---------------------------------------------------------------------
+ Query 2 — Most popular anime
+---------------------------------------------------------------------
+Business goal:
+    Identify the titles with the largest reach on AniList — the
+    "what everyone is watching" row.
+
+db.anime.find(
+    { popularity: { $gte: 100000 } },
+    { _id: 0, id: 1, title: 1, format: 1, seasonYear: 1,
+      popularity: 1, averageScore: 1, favourites: 1 }
+).sort({ popularity: -1 }).limit(10)
+
+Index used: { popularity: -1 }
+
+Performance comparison:
+    db.anime.find({ popularity: { $gte: 100000 } })
+            .sort({ popularity: -1 }).limit(10)
+            .explain("executionStats")
+
+
+---------------------------------------------------------------------
+ Query 3 — Anime by genre (Action)
+---------------------------------------------------------------------
+Business goal:
+    Power a per-genre landing page. The same query template works
+    for any genre by swapping the literal.
+
+db.anime.find(
+    { genres: "Action" },
+    { _id: 0, id: 1, title: 1, format: 1, genres: 1,
+      averageScore: 1, popularity: 1 }
+).sort({ popularity: -1 }).limit(10)
+
+Index used: { genres: 1 }   (multikey — built on the array field)
+
+Performance comparison:
+    db.anime.find({ genres: "Action" })
+            .sort({ popularity: -1 }).limit(10)
+            .explain("executionStats")
+
+Note:
+    Without the multikey index this query is a COLLSCAN that
+    materialises the full `genres` array for every document.
+
+
+---------------------------------------------------------------------
+ Query 4 — Popular AND highly rated anime
+---------------------------------------------------------------------
+Business goal:
+    "Quality + demand" — the safest titles to license / promote.
+
+db.anime.find(
+    { averageScore: { $gte: 80 },
+      popularity:   { $gte: 100000 } },
+    { _id: 0, id: 1, title: 1, format: 1, seasonYear: 1,
+      averageScore: 1, popularity: 1, favourites: 1, genres: 1 }
+).sort({ averageScore: -1, popularity: -1 }).limit(10)
+
+Index used: { averageScore: -1, popularity: -1 }   (compound)
+
+Performance comparison:
+    Same query with .explain("executionStats").
+
+Note:
+    Compound index supports BOTH the filter and the sort, so the
+    plan is a pure IXSCAN with no in-memory sort stage.
+
+
+---------------------------------------------------------------------
+ Query 5 — Recent anime (2020 onwards)
+---------------------------------------------------------------------
+Business goal:
+    Recent / upcoming releases dashboard.
+
+db.anime.find(
+    { seasonYear: { $gte: 2020 } },
+    { _id: 0, id: 1, title: 1, format: 1, season: 1, seasonYear: 1,
+      averageScore: 1, popularity: 1, status: 1 }
+).sort({ seasonYear: -1, popularity: -1 }).limit(20)
+
+Index used: { seasonYear: -1 }
+
+Performance comparison:
+    db.anime.find({ seasonYear: { $gte: 2020 } })
+            .sort({ seasonYear: -1, popularity: -1 }).limit(20)
+            .explain("executionStats")
+
+
+=====================================================================
+ SECTION 2 — AGGREGATIONS (multi-stage)
+=====================================================================
+
+---------------------------------------------------------------------
+ Aggregation 1 — Catalogue quality trend by decade
+---------------------------------------------------------------------
+Business goal:
+    Has the average user score of anime gone up or down across
+    decades?  Useful for editorial features such as "Best of the
+    2010s".
+
+db.anime.aggregate([
+    { $match: {
+        "startDate.year": { $ne: null },
+        averageScore:     { $ne: null }
+    }},
+    { $addFields: {
+        decade: { $multiply: [
+            { $floor: { $divide: ["$startDate.year", 10] } }, 10
+        ]}
+    }},
+    { $group: {
+        _id:           "$decade",
+        animeCount:    { $sum: 1 },
+        avgScore:      { $avg: "$averageScore" },
+        avgPopularity: { $avg: "$popularity" },
+        topScore:      { $max: "$averageScore" }
+    }},
+    { $project: {
+        _id: 0,
+        decade:        "$_id",
+        animeCount:    1,
+        avgScore:      { $round: ["$avgScore", 1] },
+        avgPopularity: { $round: ["$avgPopularity", 0] },
+        topScore:      1
+    }},
+    { $sort: { decade: 1 } }
+])
+
+Stages: $match → $addFields → $group → $project → $sort   (5 stages)
+
+
+---------------------------------------------------------------------
+ Aggregation 2 — Top studios (uses $lookup join)
+---------------------------------------------------------------------
+Business goal:
+    Identify the most productive animation studios (by number of
+    titles) and their average quality, after joining the studio
+    reference collection to recover their human-readable names.
+
+Data note:
+    AniList assigns a unique EDGE id to each anime↔studio
+    relationship (so the studios collection has 39 745 IDs but only
+    2 279 distinct names — e.g. "Toei Animation" appears 821 times
+    with different IDs).  Therefore we $lookup first, then group on
+    the joined name field rather than on the studio_id.
+
+db.anime.aggregate([
+    { $match:  { studios: { $ne: null } } },
+    { $unwind: "$studios" },
+    { $lookup: {
+        from:         "studios",
+        localField:   "studios",
+        foreignField: "id",
+        as:           "studio"
+    }},
+    { $unwind: "$studio" },
+    { $match:  {
+        "studio.isAnimationStudio": true,
+        "studio.name":              { $ne: null }
+    }},
+    { $group: {
+        _id:             "$studio.name",
+        animeCount:      { $sum: 1 },
+        avgScore:        { $avg: "$averageScore" },
+        totalPopularity: { $sum: "$popularity" }
+    }},
+    { $project: {
+        _id: 0,
+        studioName:      "$_id",
+        animeCount:      1,
+        avgScore:        { $round: ["$avgScore", 1] },
+        totalPopularity: 1
+    }},
+    { $sort:  { animeCount: -1 } },
+    { $limit: 15 }
+])
+
+Stages: $match → $unwind → $lookup → $unwind → $match
+        → $group → $project → $sort → $limit              (9 stages)
+
+
+---------------------------------------------------------------------
+ Aggregation 3 — Genre engagement matrix
+---------------------------------------------------------------------
+Business goal:
+    Per-genre KPIs: how many anime, average score, average reach,
+    and total favourites.  Drives genre-page UX and ad targeting.
+
+db.anime.aggregate([
+    { $match:  { genres: { $ne: null, $not: { $size: 0 } } } },
+    { $unwind: "$genres" },
+    { $group: {
+        _id:             "$genres",
+        animeCount:      { $sum: 1 },
+        avgScore:        { $avg: "$averageScore" },
+        avgPopularity:   { $avg: "$popularity" },
+        totalFavourites: { $sum: "$favourites" }
+    }},
+    { $project: {
+        _id: 0,
+        genre:           "$_id",
+        animeCount:      1,
+        avgScore:        { $round: ["$avgScore", 1] },
+        avgPopularity:   { $round: ["$avgPopularity", 0] },
+        totalFavourites: 1
+    }},
+    { $sort: { animeCount: -1 } }
+])
+
+Stages: $match → $unwind → $group → $project → $sort     (5 stages)
+
+
+---------------------------------------------------------------------
+ Aggregation 4 (bonus) — Most-reviewed anime + user score
+---------------------------------------------------------------------
+Business goal:
+    Find the titles with the most user reviews on AniList and
+    compare their AniList overall score to the average score given
+    inside individual reviews.
+
+db.anime.aggregate([
+    { $match:     { reviews: { $ne: null } } },
+    { $addFields: { reviewCount: { $size: "$reviews" } } },
+    { $sort:      { reviewCount: -1 } },
+    { $limit: 10 },
+    { $lookup: {
+        from:         "reviews",
+        localField:   "reviews",
+        foreignField: "id",
+        as:           "reviewDocs"
+    }},
+    { $addFields: { avgUserScore: { $avg: "$reviewDocs.score" } } },
+    { $project: {
+        _id: 0,
+        id: 1,
+        title: 1,
+        averageScore: 1,
+        reviewCount: 1,
+        avgUserScore: { $round: ["$avgUserScore", 1] }
+    }}
+])
+
+Stages: $match → $addFields → $sort → $limit → $lookup
+        → $addFields → $project                             (7 stages)
+
+Bug note (left here for your design-decisions report):
+    A naïve version uses `$project` to compute reviewCount before
+    `$lookup`, but $project also DROPS `reviews`, so the $lookup
+    has no localField left → avgUserScore comes back null.  We use
+    `$addFields` instead to preserve `reviews` until after the join.
+
+
+=====================================================================
+ SECTION 3 — INDEX SUMMARY
+=====================================================================
+
+Created in `schema_and_indexes.js.txt`:
+
+    anime.uniq_id              { id: 1 }                  (unique)
+    anime.score_desc           { averageScore: -1 }
+    anime.popularity_desc      { popularity: -1 }
+    anime.genres_multikey      { genres: 1 }              (multikey)
+    anime.season_year_desc     { seasonYear: -1 }
+    anime.score_pop_compound   { averageScore: -1, popularity: -1 }
+    studios.<id>               { id: 1 } (unique)
+    studios.<name>             { name: 1 }
+    tags.<id>                  { id: 1 } (unique)
+    tags.<name>                { name: 1 }
+    characters.<id>            { id: 1 }
+    reviews.<id>               { id: 1 } (unique)
+
+How to verify an index is being used:
+
+    db.anime.find( ... ).explain("executionStats")
+
+In the output look at:
+    • winningPlan.stage  — should be IXSCAN, not COLLSCAN
+    • totalDocsExamined / totalKeysExamined  (lower is better)
+    • executionTimeMillis  (the headline number to put in the
+      report's "F. Index Optimisation" section)
